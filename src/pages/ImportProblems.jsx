@@ -14,14 +14,21 @@ const DIFFICULTY_MAP = {
 function parseSheet(sheet, companyName) {
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
   return rows
-    .filter(row => row['Title'] || row['title'])
+    .filter(row => {
+      const title = row['Title'] || row['title'];
+      const difficulty = row['Difficulty'] || row['difficulty'];
+      const link = row['Link'] || row['link'] || row['URL'] || row['url'];
+      const topics = row['Topics'] || row['topics'];
+      // 5 mandatory fields: title, difficulty, link, topics, company
+      return title && difficulty && link && topics && companyName;
+    })
     .map(row => ({
-      title: row['Title'] || row['title'] || '',
+      title: String(row['Title'] || row['title']).trim(),
       difficulty: DIFFICULTY_MAP[String(row['Difficulty'] || row['difficulty'] || '').trim()] || 'medium',
-      url: row['Link'] || row['link'] || row['URL'] || row['url'] || '',
+      url: String(row['Link'] || row['link'] || row['URL'] || row['url'] || '').trim(),
       tags: String(row['Topics'] || row['topics'] || '')
         .split(',').map(t => t.trim()).filter(Boolean),
-      companies: companyName ? [companyName] : [],
+      companies: [companyName],
       platform: 'leetcode',
       status: 'todo',
       notes: '',
@@ -31,6 +38,21 @@ function parseSheet(sheet, companyName) {
       sheet: 'none',
       revision_dates: [],
     }));
+}
+
+// Merge problems with same title — combine their companies
+function mergeProblems(allProblems) {
+  const map = new Map();
+  allProblems.forEach(p => {
+    if (map.has(p.title)) {
+      const existing = map.get(p.title);
+      existing.companies = [...new Set([...existing.companies, ...p.companies])];
+      existing.tags = [...new Set([...existing.tags, ...p.tags])];
+    } else {
+      map.set(p.title, { ...p });
+    }
+  });
+  return Array.from(map.values());
 }
 
 export default function ImportProblems() {
@@ -83,21 +105,20 @@ export default function ImportProblems() {
       const { data: { user } } = await supabase.auth.getUser();
       const problems = preview.sheets
         .filter(s => selectedSheets.includes(s.name))
-        .flatMap(s => s.problems)
-        .map(p => ({ ...p, user_id: user.id }));
+        .flatMap(s => s.problems);
 
-      // Deduplicate by title
-      const unique = Array.from(new Map(problems.map(p => [p.title, p])).values());
+      // Merge companies for same title
+      const merged = mergeProblems(problems).map(p => ({ ...p, user_id: user.id }));
 
       const BATCH = 100;
       let inserted = 0;
-      for (let i = 0; i < unique.length; i += BATCH) {
+      for (let i = 0; i < merged.length; i += BATCH) {
         const { error } = await supabase.from('problems').upsert(
-          unique.slice(i, i + BATCH),
-          { onConflict: 'user_id,title', ignoreDuplicates: true }
+          merged.slice(i, i + BATCH),
+          { onConflict: 'user_id,title', ignoreDuplicates: false }
         );
         if (error) throw error;
-        inserted += Math.min(BATCH, unique.length - i);
+        inserted += Math.min(BATCH, merged.length - i);
       }
 
       setResult({ success: true, count: inserted });
@@ -109,8 +130,9 @@ export default function ImportProblems() {
   };
 
   const totalProblems = preview
-    ? preview.sheets.filter(s => selectedSheets.includes(s.name))
-        .reduce((sum, s) => sum + s.problems.length, 0)
+    ? mergeProblems(
+        preview.sheets.filter(s => selectedSheets.includes(s.name)).flatMap(s => s.problems)
+      ).length
     : 0;
 
   return (
@@ -182,11 +204,11 @@ export default function ImportProblems() {
                   </tr>
                 </thead>
                 <tbody>
-                  {preview.sheets
-                    .filter(s => selectedSheets.includes(s.name))
-                    .flatMap(s => s.problems)
-                    .slice(0, 8)
-                    .map((p, i) => (
+                  {mergeProblems(
+                    preview.sheets
+                      .filter(s => selectedSheets.includes(s.name))
+                      .flatMap(s => s.problems)
+                  ).slice(0, 8).map((p, i) => (
                       <tr key={i} className="border-b border-border/50 hover:bg-muted/20">
                         <td className="px-3 py-2 font-medium truncate max-w-[180px]">{p.title}</td>
                         <td className="px-3 py-2">
@@ -200,7 +222,7 @@ export default function ImportProblems() {
                           {p.tags.slice(0, 2).join(', ')}
                         </td>
                         <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">
-                          {p.companies[0] || '—'}
+                          {p.companies.join(', ') || '—'}
                         </td>
                       </tr>
                     ))}
@@ -243,9 +265,9 @@ export default function ImportProblems() {
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Expected Format</p>
         <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
           <li>Each sheet = one company (sheet name used as company tag)</li>
-          <li>Required columns: <code className="bg-muted px-1 rounded">Title</code>, <code className="bg-muted px-1 rounded">Difficulty</code></li>
-          <li>Optional columns: <code className="bg-muted px-1 rounded">Link</code>, <code className="bg-muted px-1 rounded">Topics</code>, <code className="bg-muted px-1 rounded">Frequency</code></li>
-          <li>Duplicate problems (same title) are skipped automatically</li>
+          <li>Mandatory columns: <code className="bg-muted px-1 rounded">Title</code>, <code className="bg-muted px-1 rounded">Difficulty</code>, <code className="bg-muted px-1 rounded">Link</code>, <code className="bg-muted px-1 rounded">Topics</code> + sheet name as Company</li>
+          <li>Same problem in multiple sheets → merged with all companies listed</li>
+          <li>Rows missing any mandatory field are skipped automatically</li>
         </ul>
       </div>
     </div>
