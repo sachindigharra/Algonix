@@ -13,6 +13,7 @@ import Learning from './pages/Learning';
 import Analytics from './pages/Analytics';
 import Portfolio from './pages/Portfolio';
 import Settings from './pages/Settings';
+import ImportProblems from './pages/ImportProblems';
 
 
 const AuthenticatedApp = () => {
@@ -36,6 +37,7 @@ const AuthenticatedApp = () => {
         <Route path="/analytics" element={<Analytics />} />
         <Route path="/portfolio" element={<Portfolio />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/import" element={<ImportProblems />} />
       </Route>
       <Route path="*" element={<PageNotFound />} />
     </Routes>

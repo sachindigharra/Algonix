@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Code2, Trophy, BookOpen, User,
   BarChart3, ChevronLeft, ChevronRight, Flame, Settings,
-  LogOut, Menu, X, Sun, Moon } from 'lucide-react';
+  LogOut, Menu, X, Sun, Moon, FileSpreadsheet } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,8 @@ const navItems = [
 { icon: BookOpen, label: 'Learning', path: '/learning' },
 { icon: BarChart3, label: 'Analytics', path: '/analytics' },
 { icon: User, label: 'Portfolio', path: '/portfolio' },
-{ icon: Settings, label: 'Settings', path: '/settings' }];
+{ icon: Settings, label: 'Settings', path: '/settings' },
+{ icon: FileSpreadsheet, label: 'Import', path: '/import' }];
 
 
 export default function Sidebar() {
