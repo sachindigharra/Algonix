@@ -26,12 +26,14 @@ export default function Settings() {
 
   const queryClient = useQueryClient();
   const { data: profiles = [] } = useQuery({
-    queryKey: ['platform-profiles'],
+    queryKey: ['platform-profiles', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('platform_profiles').select('*');
+      if (!user?.id) return [];
+      const { data, error } = await supabase.from('platform_profiles').select('*').eq('user_id', user.id);
       if (error) throw error;
       return data;
     },
+    enabled: !!user?.id,
   });
 
   const createMutation = useMutation({

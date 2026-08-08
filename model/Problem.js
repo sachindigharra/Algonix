@@ -55,15 +55,15 @@ Problem={
       "type": "string",
       "description": "Personal notes and approach"
     },
-    "approach": {
+    "approaches": {
       "type": "string",
       "description": "Solution approach explanation"
     },
-    "time_complexity": {
+    "timeComplexity": {
       "type": "string",
       "description": "Time complexity of the solution"
     },
-    "space_complexity": {
+    "spaceComplexity": {
       "type": "string",
       "description": "Space complexity of the solution"
     },

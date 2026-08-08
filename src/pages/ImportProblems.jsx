@@ -1,17 +1,22 @@
+// @ts-nocheck
 import React, { useState, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
+import { bulkImportProblems } from '@/api/problemApi';
+import { USE_SPRING } from '@/api/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {getUser} from '/src/api/authApi'
 
 const DIFFICULTY_MAP = {
   'easy': 'easy', 'medium': 'medium', 'hard': 'hard',
   'EASY': 'easy', 'MEDIUM': 'medium', 'HARD': 'hard',
 };
 
-function parseSheet(sheet, companyName) {
+function parseSheet(sheet) {
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
   return rows
     .filter(row => {
@@ -19,25 +24,27 @@ function parseSheet(sheet, companyName) {
       const difficulty = row['Difficulty'] || row['difficulty'];
       const link = row['Link'] || row['link'] || row['URL'] || row['url'];
       const topics = row['Topics'] || row['topics'];
-      // 5 mandatory fields: title, difficulty, link, topics, company
-      return title && difficulty && link && topics && companyName;
+      return title && difficulty && link && topics;
     })
-    .map(row => ({
-      title: String(row['Title'] || row['title']).trim(),
-      difficulty: DIFFICULTY_MAP[String(row['Difficulty'] || row['difficulty'] || '').trim()] || 'medium',
-      url: String(row['Link'] || row['link'] || row['URL'] || row['url'] || '').trim(),
-      tags: String(row['Topics'] || row['topics'] || '')
-        .split(',').map(t => t.trim()).filter(Boolean),
-      companies: [companyName],
-      platform: 'leetcode',
-      status: 'todo',
-      notes: '',
-      approach: '',
-      time_complexity: '',
-      space_complexity: '',
-      sheet: 'none',
-      revision_dates: [],
-    }));
+    .map(row => {
+      const difficultyKey = String(row['Difficulty'] || row['difficulty'] || '').trim();
+      return {
+        title: String(row['Title'] || row['title']).trim(),
+        difficulty: DIFFICULTY_MAP[difficultyKey] || 'medium',
+        url: String(row['Link'] || row['link'] || row['URL'] || row['url'] || '').trim(),
+        tags: String(row['Topics'] || row['topics'] || '')
+          .split(',').map(t => t.trim()).filter(Boolean),
+        companies: [],
+        platform: 'leetcode',
+        status: 'todo',
+        notes: '',
+        approach: '',
+        time_complexity: '',
+        space_complexity: '',
+        sheet: 'none',
+        revision_dates: [],
+      };
+    });
 }
 
 // Merge problems with same title — combine their companies
@@ -65,10 +72,10 @@ export default function ImportProblems() {
   const processFile = (file) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const workbook = XLSX.read(e.target.result, { type: 'array' });
+      const workbook = XLSX.read(e.target?.result, { type: 'array' });
       const sheets = workbook.SheetNames.map(name => ({
         name,
-        problems: parseSheet(workbook.Sheets[name], name === 'All' ? null : name),
+        problems: parseSheet(workbook.Sheets[name], name),
       })).filter(s => s.problems.length > 0);
 
       setPreview({ fileName: file.name, sheets });
@@ -96,32 +103,76 @@ export default function ImportProblems() {
     );
   };
 
+  const updateCompanyName = (sheetName, companyName) => {
+    setPreview(prev => prev && {
+      ...prev,
+      sheets: prev.sheets.map(sheet =>
+        sheet.name === sheetName ? { ...sheet, companyName } : sheet
+      ),
+    });
+  };
+
   const handleImport = async () => {
     if (!preview) return;
     setImporting(true);
     setResult(null);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const problems = preview.sheets
-        .filter(s => selectedSheets.includes(s.name))
-        .flatMap(s => s.problems);
+      const selectedSheetsWithCompany = preview.sheets
+        .filter(s => selectedSheets.includes(s.name));
 
-      // Merge companies for same title
-      const merged = mergeProblems(problems).map(p => ({ ...p, user_id: user.id }));
-
-      const BATCH = 100;
-      let inserted = 0;
-      for (let i = 0; i < merged.length; i += BATCH) {
-        const { error } = await supabase.from('problems').upsert(
-          merged.slice(i, i + BATCH),
-          { onConflict: 'user_id,title', ignoreDuplicates: false }
-        );
-        if (error) throw error;
-        inserted += Math.min(BATCH, merged.length - i);
+      const missingCompany = selectedSheetsWithCompany.find(s => !s.companyName?.trim());
+      if (missingCompany) {
+        throw new Error(`Please enter a company name for sheet: ${missingCompany.name}`);
       }
 
-      setResult({ success: true, count: inserted });
+      const problems = selectedSheetsWithCompany
+        .flatMap(sheet => sheet.problems.map(problem => ({
+          ...problem,
+          companies: [sheet.companyName.trim()],
+        })));
+
+      // Merge companies for same title
+      const merged = mergeProblems(problems);
+
+      if (USE_SPRING) {
+        // ── Spring Boot path ──────────────────────────────────────────────────
+        // toBackend() transform is applied inside bulkImportProblems
+        const response = await bulkImportProblems(merged);
+        setResult({ success: true, count: response?.count ?? merged.length });
+      } else {
+        // ── Supabase path ─────────────────────────────────────────────────────
+        const { data } = await supabase.auth.getUser();
+        const user = data?.user;
+        if (!user?.id) throw new Error('User not authenticated');
+
+        const payload = merged.map(p => ({ ...p, user_id: user.id }));
+        const BATCH = 100;
+        let inserted = 0;
+
+        const upsertChunk = async (chunk) => {
+          const { error } = await supabase.from('problems').upsert(
+            chunk,
+            { onConflict: ['user_id', 'title'] }
+          );
+          if (error) {
+            const message = String(error.message || '');
+            if (message.includes('no unique or exclusion constraint matching the ON CONFLICT specification')) {
+              const insertResult = await supabase.from('problems').insert(chunk);
+              if (insertResult.error) throw insertResult.error;
+              return;
+            }
+            throw error;
+          }
+        };
+
+        for (let i = 0; i < payload.length; i += BATCH) {
+          await upsertChunk(payload.slice(i, i + BATCH));
+          inserted += Math.min(BATCH, payload.length - i);
+        }
+
+        setResult({ success: true, count: inserted });
+      }
     } catch (err) {
       setResult({ success: false, message: err.message });
     } finally {
@@ -153,7 +204,7 @@ export default function ImportProblems() {
           'border-2 border-dashed rounded-xl p-10 text-center transition-colors cursor-pointer',
           dragging ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 hover:bg-muted/30'
         )}
-        onClick={() => document.getElementById('file-input').click()}
+        onClick={() => document.getElementById('file-input')?.click()}
       >
         <input id="file-input" type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileInput} />
         <FileSpreadsheet className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
@@ -188,6 +239,25 @@ export default function ImportProblems() {
               >
                 {s.name} <span className="opacity-70">({s.problems.length})</span>
               </button>
+            ))}
+          </div>
+
+          <div className="space-y-4">
+            {preview.sheets.map(sheet => (
+              <div key={sheet.name} className="grid gap-2 sm:grid-cols-[1fr_220px] sm:items-end">
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground">Sheet</p>
+                  <p className="text-sm font-medium">{sheet.name}</p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground mb-1 block">Company name</label>
+                  <Input
+                    value={sheet.companyName}
+                    placeholder="Enter company name"
+                    onChange={(e) => updateCompanyName(sheet.name, e.target.value)}
+                  />
+                </div>
+              </div>
             ))}
           </div>
 

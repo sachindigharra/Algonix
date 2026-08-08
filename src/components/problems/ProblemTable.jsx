@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Pencil, Trash2, ExternalLink, RotateCcw } from 'lucide-react';
+import { Pencil, Trash2, ExternalLink, Loader2, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
@@ -27,7 +27,18 @@ const platformLabels = {
   other: 'Other',
 };
 
-export default function ProblemTable({ problems, onEdit, onDelete }) {
+export default function ProblemTable({ problems, onEdit, onDelete, onStatusChange }) {
+  const [updatingId, setUpdatingId] = useState(null);
+
+  const handleStatusChange = async (problemId, currentStatus) => {
+    const newStatus = currentStatus === 'solved' ? 'todo' : 'solved';
+    setUpdatingId(problemId);
+    try {
+      await onStatusChange(problemId, newStatus);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
   if (problems.length === 0) {
     return (
       <div className="bg-card rounded-xl border border-border p-12 text-center">
@@ -56,6 +67,17 @@ export default function ProblemTable({ problems, onEdit, onDelete }) {
               <tr key={problem.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleStatusChange(problem.id, problem.status)}
+                      disabled={updatingId === problem.id}
+                      className="flex items-center justify-center h-5 w-5 rounded border border-input hover:bg-accent disabled:opacity-50 transition-colors"
+                    >
+                      {updatingId === problem.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                      ) : problem.status === 'solved' ? (
+                        <CheckCircle2 className="w-4 h-4 text-success" />
+                      ) : null}
+                    </button>
                     <span className="text-sm font-medium truncate max-w-[200px]">{problem.title}</span>
                     {problem.url && (
                       <a href={problem.url} target="_blank" rel="noopener noreferrer">

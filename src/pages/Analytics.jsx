@@ -1,10 +1,13 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { format, subDays, startOfWeek, eachDayOfInterval, eachWeekOfInterval } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import StreakHeatmap from '../components/dashboard/StreakHeatmap';
+import DifficultyBreakdown from '../components/dashboard/DifficultyBreakdown';
+import TopicChart from '../components/dashboard/TopicChart';
 
 const chartTooltipStyle = {
   background: 'hsl(222, 47%, 9%)',
@@ -15,13 +18,21 @@ const chartTooltipStyle = {
 };
 
 export default function Analytics() {
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => setUser(user));
+  }, []);
+
   const { data: problems = [] } = useQuery({
-    queryKey: ['problems'],
+    queryKey: ['problems', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('problems').select('*').order('created_at', { ascending: false }).limit(500);
+      if (!user?.id) return [];
+      const { data, error } = await supabase.from('problems').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
       if (error) throw error;
       return data;
     },
+    enabled: !!user?.id,
   });
 
   const solved = useMemo(() => problems.filter(p => p.status === 'solved'), [problems]);
@@ -196,6 +207,15 @@ export default function Analytics() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Activity Heatmap */}
+      <StreakHeatmap problems={problems.filter(p => p.status === 'solved')} />
+
+      {/* Difficulty & Topic breakdown */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <DifficultyBreakdown problems={problems} />
+        <TopicChart problems={problems.filter(p => p.status === 'solved')} />
       </div>
     </div>
   );
