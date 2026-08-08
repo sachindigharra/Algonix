@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
@@ -21,15 +21,22 @@ export default function Contests() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', platform: 'leetcode', start_time: '', duration_minutes: 120, url: '', participated: false, rank: '', problems_solved: '', rating_change: '', notes: '' });
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => setUser(user));
+  }, []);
 
   const queryClient = useQueryClient();
   const { data: contests = [], isLoading } = useQuery({
-    queryKey: ['contests'],
+    queryKey: ['contests', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('contests').select('*').order('start_time', { ascending: false }).limit(200);
+      if (!user?.id) return [];
+      const { data, error } = await supabase.from('contests').select('*').eq('user_id', user.id).order('start_time', { ascending: false });
       if (error) throw error;
       return data;
     },
+    enabled: !!user?.id,
   });
 
   const createMutation = useMutation({

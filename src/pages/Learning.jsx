@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
@@ -14,15 +14,22 @@ export default function Learning() {
   const [content, setContent] = useState('');
   const [topics, setTopics] = useState([]);
   const [topicInput, setTopicInput] = useState('');
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => setUser(user));
+  }, []);
 
   const queryClient = useQueryClient();
   const { data: logs = [] } = useQuery({
-    queryKey: ['learning-logs'],
+    queryKey: ['learning-logs', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('learning_logs').select('*').order('date', { ascending: false }).limit(200);
+      if (!user?.id) return [];
+      const { data, error } = await supabase.from('learning_logs').select('*').eq('user_id', user.id).order('date', { ascending: false }).limit(200);
       if (error) throw error;
       return data;
     },
+    enabled: !!user?.id,
   });
 
   const createMutation = useMutation({

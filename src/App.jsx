@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/toaster"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 
@@ -13,10 +13,14 @@ import Learning from './pages/Learning';
 import Analytics from './pages/Analytics';
 import Portfolio from './pages/Portfolio';
 import Settings from './pages/Settings';
+import ImportProblems from './pages/ImportProblems';
+import Roadmap from './pages/Roadmap';
+import Login from './pages/Login';
+import Signup from './pages/Signup';
 
 
 const AuthenticatedApp = () => {
-  const { isLoadingAuth } = useAuth();
+  const { isLoadingAuth, isAuthenticated } = useAuth();
 
   if (isLoadingAuth) {
     return (
@@ -28,16 +32,30 @@ const AuthenticatedApp = () => {
 
   return (
     <Routes>
-      <Route element={<AppLayout />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/problems" element={<Problems />} />
-        <Route path="/contests" element={<Contests />} />
-        <Route path="/learning" element={<Learning />} />
-        <Route path="/analytics" element={<Analytics />} />
-        <Route path="/portfolio" element={<Portfolio />} />
-        <Route path="/settings" element={<Settings />} />
-      </Route>
-      <Route path="*" element={<PageNotFound />} />
+      {!isAuthenticated ? (
+        <>
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </>
+      ) : (
+        <>
+          <Route element={<AppLayout />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/problems" element={<Problems />} />
+            <Route path="/contests" element={<Contests />} />
+            <Route path="/learning" element={<Learning />} />
+            <Route path="/analytics" element={<Analytics />} />
+            <Route path="/portfolio" element={<Portfolio />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/import" element={<ImportProblems />} />
+            <Route path="/roadmap" element={<Roadmap />} />
+          </Route>
+          <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route path="/signup" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<PageNotFound />} />
+        </>
+      )}
     </Routes>
   );
 };

@@ -1,65 +1,133 @@
-import React, { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useMemo, useEffect, useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { Code2, Trophy, Flame, Target, BookOpen } from 'lucide-react';
+import { Code2, Trophy, Flame, BookOpen, TrendingUp, Brain } from 'lucide-react';
 import { subDays, format, isAfter } from 'date-fns';
+import { toast } from 'sonner';
+
 import StatCard from '../components/dashboard/StatCard';
-import StreakHeatmap from '../components/dashboard/StreakHeatmap';
-import TopicChart from '../components/dashboard/TopicChart';
-import DifficultyBreakdown from '../components/dashboard/DifficultyBreakdown';
-import RecentProblems from '../components/dashboard/RecentProblems';
+import TodayFocus from '../components/dashboard/TodayFocus';
+import TodayActivity from '../components/dashboard/TodayActivity';
+import PatternMastery from '../components/dashboard/PatternMastery';
+import RoadmapProgress from '../components/dashboard/RoadmapProgress';
+import PlatformSummary from '../components/dashboard/PlatformSummary';
+
+import {
+  getDueRevisions,
+  getTodaySolvedProblems,
+  computePatternMastery,
+} from '@/lib/patternEngine';
+import { computeRoadmapProgress } from '@/lib/studyRoadmap';
 
 export default function Dashboard() {
+  const [user, setUser] = useState(null);
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => setUser(user));
+  }, []);
+
   const { data: problems = [] } = useQuery({
-    queryKey: ['problems'],
+    queryKey: ['problems', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('problems').select('*').order('created_at', { ascending: false }).limit(500);
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from('problems')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
     },
+    enabled: !!user?.id,
   });
 
   const { data: contests = [] } = useQuery({
-    queryKey: ['contests'],
+    queryKey: ['contests', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('contests').select('*').order('created_at', { ascending: false }).limit(100);
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from('contests')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
     },
+    enabled: !!user?.id,
   });
 
   const { data: logs = [] } = useQuery({
-    queryKey: ['learning-logs'],
+    queryKey: ['learning-logs', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('learning_logs').select('*').order('created_at', { ascending: false }).limit(100);
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from('learning_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
     },
+    enabled: !!user?.id,
   });
 
+  const { data: profiles = [] } = useQuery({
+    queryKey: ['platform-profiles', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from('platform_profiles')
+        .select('*')
+        .eq('user_id', user.id);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user?.id,
+  });
+
+  // Mark a problem as re-solved
+  const markRevisitedMutation = useMutation({
+    mutationFn: async (problem) => {
+      const today = new Date().toISOString().split('T')[0];
+      const existingDates = problem.revision_dates || [];
+      const { error } = await supabase
+        .from('problems')
+        .update({ revision_dates: [...existingDates, today], status: 'solved' })
+        .eq('id', problem.id);
+      if (error) throw error;
+    },
+    onSuccess: (_, problem) => {
+      queryClient.invalidateQueries({ queryKey: ['problems'] });
+      toast.success(`"${problem.title}" re-solved! Pattern understanding confirmed. 🎯`);
+    },
+    onError: () => toast.error('Failed to update. Please try again.'),
+  });
+
+  // Stats
   const stats = useMemo(() => {
     const solved = problems.filter(p => p.status === 'solved');
-    const thisWeek = solved.filter(p => {
-      const d = new Date(p.solved_date || p.created_date);
-      return isAfter(d, subDays(new Date(), 7));
-    });
+    const thisWeek = solved.filter(p =>
+      isAfter(new Date(p.solved_date || p.created_date), subDays(new Date(), 7))
+    );
     const lastWeek = solved.filter(p => {
       const d = new Date(p.solved_date || p.created_date);
       return isAfter(d, subDays(new Date(), 14)) && !isAfter(d, subDays(new Date(), 7));
     });
 
-    // Calculate streak
     let streak = 0;
-    const today = new Date();
     for (let i = 0; i < 365; i++) {
-      const dateStr = format(subDays(today, i), 'yyyy-MM-dd');
-      const hasSolved = solved.some(p => {
+      const dateStr = format(subDays(new Date(), i), 'yyyy-MM-dd');
+      const hit = solved.some(p => {
         const sd = p.solved_date || p.created_date;
         return sd && format(new Date(sd), 'yyyy-MM-dd') === dateStr;
       });
-      if (hasSolved) streak++;
+      if (hit) streak++;
       else if (i > 0) break;
     }
+
+    const patternStats = computePatternMastery(problems);
+    const masteredPatterns = patternStats.filter(p => p.masteryRate >= 70).length;
+    const tutorialLoops = patternStats.filter(p => p.inTutorialLoop).length;
 
     return {
       totalSolved: solved.length,
@@ -68,18 +136,27 @@ export default function Dashboard() {
       streak,
       contestsJoined: contests.filter(c => c.participated).length,
       learningDays: logs.length,
+      masteredPatterns,
+      tutorialLoops,
     };
   }, [problems, contests, logs]);
 
+  const dueRevisions = useMemo(() => getDueRevisions(problems), [problems]);
+  const todayProblems = useMemo(() => getTodaySolvedProblems(problems), [problems]);
+  const patternStats = useMemo(() => computePatternMastery(problems), [problems]);
+  const roadmapData = useMemo(() => computeRoadmapProgress(problems, 'tuf_az'), [problems]);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-1">Track your coding journey</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Your daily command center — focus on what matters right now.
+        </p>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Stat cards — only the numbers that drive daily decisions */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
           title="Problems Solved"
           value={stats.totalSolved}
@@ -88,34 +165,47 @@ export default function Dashboard() {
           trendUp={stats.thisWeek >= stats.lastWeek}
         />
         <StatCard
-          title="Current Streak"
-          value={`${stats.streak} days`}
+          title="Streak"
+          value={`${stats.streak}d`}
           icon={Flame}
-          subtitle="Keep it going!"
+          subtitle="consecutive days"
+        />
+        <StatCard
+          title="Patterns Mastered"
+          value={stats.masteredPatterns}
+          icon={Brain}
+          subtitle={
+            stats.tutorialLoops > 0
+              ? `${stats.tutorialLoops} loop${stats.tutorialLoops > 1 ? 's' : ''} detected`
+              : 'Keep re-solving!'
+          }
         />
         <StatCard
           title="Contests"
           value={stats.contestsJoined}
           icon={Trophy}
-          subtitle="Participated"
-        />
-        <StatCard
-          title="Learning Days"
-          value={stats.learningDays}
-          icon={BookOpen}
-          subtitle="Entries logged"
+          subtitle="participated"
         />
       </div>
 
-      {/* Heatmap */}
-      <StreakHeatmap problems={problems.filter(p => p.status === 'solved')} />
+      {/* Revision queue — the most actionable thing on the page */}
+      <TodayFocus
+        dueProblems={dueRevisions}
+        onMarkRevisited={(problem) => markRevisitedMutation.mutate(problem)}
+        isUpdating={markRevisitedMutation.isPending}
+      />
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <DifficultyBreakdown problems={problems} />
-        <TopicChart problems={problems.filter(p => p.status === 'solved')} />
-        <RecentProblems problems={problems} />
+      {/* Roadmap + Today's activity — where you are and what you did today */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <RoadmapProgress roadmap={roadmapData} />
+        <TodayActivity todayProblems={todayProblems} />
       </div>
+
+      {/* Pattern mastery — honest view of what you actually understand */}
+      <PatternMastery patternStats={patternStats} />
+
+      {/* Platform stats — cross-platform progress at a glance */}
+      <PlatformSummary profiles={profiles} />
     </div>
   );
 }

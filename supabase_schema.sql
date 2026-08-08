@@ -1,3 +1,6 @@
+-- Enable UUID generation extension
+create extension if not exists "pgcrypto";
+
 -- Problems table
 create table problems (
   id uuid primary key default gen_random_uuid(),
@@ -18,6 +21,8 @@ create table problems (
   revision_dates text[] default '{}',
   created_at timestamptz default now()
 );
+
+create unique index if not exists problems_user_title_unique on problems (user_id, title);
 
 -- Contests table
 create table contests (
@@ -64,14 +69,26 @@ create table platform_profiles (
   unique(user_id, platform)
 );
 
+-- User profiles table
+create table if not exists user_profiles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade unique not null,
+  full_name text,
+  avatar_url text,
+  bio text,
+  updated_at timestamptz default now()
+);
+
 -- Row Level Security
 alter table problems enable row level security;
 alter table contests enable row level security;
 alter table learning_logs enable row level security;
 alter table platform_profiles enable row level security;
+alter table user_profiles enable row level security;
 
 -- RLS Policies (users can only access their own data)
 create policy "users can manage their problems" on problems for all using (auth.uid() = user_id);
 create policy "users can manage their contests" on contests for all using (auth.uid() = user_id);
 create policy "users can manage their learning logs" on learning_logs for all using (auth.uid() = user_id);
 create policy "users can manage their platform profiles" on platform_profiles for all using (auth.uid() = user_id);
+create policy "users can manage their user profile" on user_profiles for all using (auth.uid() = user_id);
