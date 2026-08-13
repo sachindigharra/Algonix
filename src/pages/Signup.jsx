@@ -1,50 +1,46 @@
 // @ts-nocheck
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import{register} from '/src/api/authApi'
+import { register } from '/src/api/authApi';
+import { useAuth } from '@/lib/auth-context';
 
 export default function Signup() {
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { setAuthUser } = useAuth();
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setLoading(true);
-    /* 
-      AlgoNix backend
-        const { data, error } = await signUp({
+
+    try {
+      const response = await register({
+        fullName: fullName.trim(),
         email: email.trim(),
         password,
       });
 
-     */
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-    });
+      const userData = response?.data ?? response;
 
-    setLoading(false);
-
-    if (error) {
-      toast.error(error.message || 'Unable to sign up');
-      return;
+      if (userData?.userId) {
+        setAuthUser(userData);
+        toast.success('Account created successfully!');
+        navigate('/');
+      } else {
+        toast.error('Registration failed. Please try again.');
+      }
+    } catch (err) {
+      toast.error(err.message || 'Unable to sign up');
+    } finally {
+      setLoading(false);
     }
-
-    if (data?.session) {
-      toast.success('Account created successfully!');
-      navigate('/');
-      return;
-    }
-
-    toast.success('Check your inbox to confirm your email before signing in.');
-    navigate('/login');
   };
 
   return (
@@ -56,6 +52,18 @@ export default function Signup() {
         </div>
 
         <form className="space-y-6" onSubmit={handleSubmit}>
+          <div className="space-y-2">
+            <Label htmlFor="fullName">Full Name</Label>
+            <Input
+              id="fullName"
+              type="text"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+              placeholder="John Doe"
+              required
+            />
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input

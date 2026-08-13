@@ -51,25 +51,14 @@ const SHEET_DOWN     = Object.fromEntries(Object.entries(SHEET_UP).map(([k, v]) 
 
 export function toBackend(problem) {
   return {
-    title:           problem.title,
-    url:             problem.url || "",
-    platform:        PLATFORM_UP[problem.platform]   ?? problem.platform?.toUpperCase()   ?? "LEETCODE",
-    difficulty:      DIFFICULTY_UP[problem.difficulty] ?? problem.difficulty?.toUpperCase() ?? "MEDIUM",
-    status:          STATUS_UP[problem.status]        ?? problem.status?.toUpperCase()      ?? "TODO",
-    sheet:           SHEET_UP[problem.sheet]          ?? problem.sheet?.toUpperCase()       ?? "NONE",
-    tags:            problem.tags            || [],
-    companies:       problem.companies       || [],
-
-    // already arrays from the form
-    patterns:        problem.patterns   || [],
-    approaches:      problem.approaches || [],
-
-    // snake_case → camelCase
-    timeComplexity:  problem.time_complexity  || problem.timeComplexity  || "",
-    spaceComplexity: problem.space_complexity || problem.spaceComplexity || "",
-    revisionDates:   problem.revision_dates   || problem.revisionDates   || [],
-
-    notes:           problem.notes || "",
+    title:      problem.title,
+    url:        problem.url        || "",
+    platform:   PLATFORM_UP[problem.platform]    ?? problem.platform?.toUpperCase()    ?? "LEETCODE",
+    difficulty: DIFFICULTY_UP[problem.difficulty] ?? problem.difficulty?.toUpperCase() ?? "MEDIUM",
+    visibility: problem.visibility?.toUpperCase() ?? "PRIVATE",
+    tags:       Array.isArray(problem.tags)      ? problem.tags      : [],
+    companies:  Array.isArray(problem.companies) ? problem.companies : [],
+    patterns:   Array.isArray(problem.patterns)  ? problem.patterns  : [],
   };
 }
 
@@ -113,17 +102,37 @@ export function getProblems() {
   return api("/problems").then(data => data.map(fromBackend));
 }
 
+// Create a new problem (metadata only — Problem entity)
 export function createProblem(problem) {
+  const payload = toBackend(problem);
+  console.log('[createProblem] payload:', JSON.stringify(payload, null, 2));
   return api("/problems", {
     method: "POST",
+    body: JSON.stringify(payload),
+  }).then(fromBackend);
+}
+
+// Update problem metadata (title, platform, difficulty, tags, companies, patterns, url, visibility)
+export function updateProblemMeta(id, problem) {
+  return api(`/problems/${id}`, {
+    method: "PUT",
     body: JSON.stringify(toBackend(problem)),
   }).then(fromBackend);
 }
 
-export function updateProblem(id, problem) {
-  return api(`/problems/${id}`, {
+// Update user's personal tracking (status, notes, approaches, complexity, sheet, solvedDate)
+export function updateProblemTracking(id, tracking) {
+  return api(`/problems/${id}/tracking`, {
     method: "PUT",
-    body: JSON.stringify(toBackend(problem)),
+    body: JSON.stringify({
+      status:          STATUS_UP[tracking.status]  ?? tracking.status?.toUpperCase() ?? "TODO",
+      notes:           tracking.notes           || "",
+      approaches:      tracking.approaches      || "",
+      timeComplexity:  tracking.timeComplexity  || "",
+      spaceComplexity: tracking.spaceComplexity || "",
+      sheet:           SHEET_UP[tracking.sheet] ?? tracking.sheet?.toUpperCase() ?? "NONE",
+      solvedDate:      tracking.solvedDate      || null,
+    }),
   }).then(fromBackend);
 }
 
@@ -134,7 +143,6 @@ export function deleteProblem(id) {
 }
 
 // Bulk import — used by ImportProblems.jsx
-// Accepts the already-merged frontend array, transforms each to backend shape
 export function bulkImportProblems(problems) {
   return api("/problems/upsert", {
     method: "POST",

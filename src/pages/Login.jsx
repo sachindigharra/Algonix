@@ -1,52 +1,44 @@
 // @ts-nocheck
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import{login} from '/src/api/authApi'
+import { login } from '/src/api/authApi';
+import { useAuth } from '@/lib/auth-context';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { setAuthUser } = useAuth();
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setLoading(true);
 
-    
-    /*
-     AlgoNix Spring Auth
-    */
-    /* const { data, error } = await login({
-      email: email.trim(),
-      password,
-    }); */
-    
+    try {
+      const response = await login({
+        email: email.trim(),
+        password,
+      });
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+      const userData = response?.data ?? response;
 
-    setLoading(false);
-
-    if (error) {
-      toast.error(error.message || 'Unable to sign in');
-      return;
+      if (userData?.userId) {
+        setAuthUser(userData);
+        toast.success('Welcome back!');
+        navigate('/');
+      } else {
+        toast.error('Login failed. Please try again.');
+      }
+    } catch (err) {
+      toast.error(err.message || 'Unable to sign in');
+    } finally {
+      setLoading(false);
     }
-
-    if (data.session) {
-      toast.success('Welcome back!');
-      navigate('/');
-      return;
-    }
-
-    toast.success('Check your inbox to complete sign in.');
   };
 
   return (

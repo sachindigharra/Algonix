@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Pencil, Trash2, ExternalLink, Loader2, CheckCircle2 } from 'lucide-react';
+import { Pencil, Trash2, ExternalLink, Loader2, CheckCircle2, BookOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
@@ -27,7 +27,7 @@ const platformLabels = {
   other: 'Other',
 };
 
-export default function ProblemTable({ problems, onEdit, onDelete, onStatusChange }) {
+export default function ProblemTable({ problems, onEdit, onUpdateTracking, onDelete, onStatusChange }) {
   const [updatingId, setUpdatingId] = useState(null);
 
   const handleStatusChange = async (problemId, currentStatus) => {
@@ -118,7 +118,10 @@ export default function ProblemTable({ problems, onEdit, onDelete, onStatusChang
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(problem)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-primary hover:text-primary" title="Update progress" onClick={() => onUpdateTracking(problem)}>
+                      <BookOpen className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit problem" onClick={() => onEdit(problem)}>
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => onDelete(problem.id)}>

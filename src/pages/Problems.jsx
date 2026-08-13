@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { getProblems, createProblem, updateProblemMeta, updateProblemTracking, deleteProblem } from '@/api/problemApi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,6 +10,7 @@ import ProblemTable from '../components/problems/ProblemTable';
 import ProblemFormDialog from '../components/problems/ProblemFormDialog';
 import PatternFilter from '../components/problems/PatternFilter';
 import TopicFilter from '../components/problems/TopicFilter';
+import { useAuth } from '@/lib/auth-context';
 
 // ─── Curated company sheets ────────────────────────────────────────────────
 // Each sheet pre-applies a company filter (one company or multi-company logic).
@@ -103,7 +104,7 @@ export default function Problems() {
 
   const [showForm, setShowForm] = useState(false);
   const [editingProblem, setEditingProblem] = useState(null);
-  const [user, setUser] = useState(null);
+  const [formMode, setFormMode] = useState('create'); // 'create' | 'tracking'
 
   // Filter state — restored from localStorage or defaults
   const [activeSheet, setActiveSheetState]     = useState(saved?.activeSheet     ?? DEFAULT_FILTERS.activeSheet);
@@ -116,8 +117,34 @@ export default function Problems() {
   const [filterPatterns, setPatternsState]     = useState(saved?.filterPatterns  ?? DEFAULT_FILTERS.filterPatterns);
 
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.userId;
+  console.log('[Problems] user:', user, '| userId:', userId);
 
-  // Persist every filter change to localStorage
+  const { data: problems = [], isLoading } = useQuery({
+    queryKey: ['problems'],
+    queryFn: getProblems,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data) => createProblem(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['problems'] }),
+  });
+
+  const updateMetaMutation = useMutation({
+    mutationFn: ({ id, data }) => updateProblemMeta(id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['problems'] }),
+  });
+
+  const updateTrackingMutation = useMutation({
+    mutationFn: ({ id, data }) => updateProblemTracking(id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['problems'] }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => deleteProblem(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['problems'] }),
+  });
   const persist = useCallback((patch) => {
     const current = loadSavedFilters() ?? DEFAULT_FILTERS;
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, ...patch }));
@@ -132,50 +159,6 @@ export default function Problems() {
   const setFilterSheet    = (v) => { setSheetState(v);         persist({ filterSheet: v }); };
   const setFilterTopics   = (v) => { setTopicsState(v);        persist({ filterTopics: v }); };
   const setFilterPatterns = (v) => { setPatternsState(v);      persist({ filterPatterns: v }); };
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => setUser(user));
-  }, []);
-
-  const { data: problems = [], isLoading } = useQuery({
-    queryKey: ['problems', user?.id],
-    queryFn: async () => {
-      if (!user?.id) return [];
-      const { data, error } = await supabase
-        .from('problems')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!user?.id,
-  });
-
-  const createMutation = useMutation({
-    mutationFn: async (data) => {
-      const { data: { user } } = await supabase.auth.getUser();
-      const { error } = await supabase.from('problems').insert({ ...data, user_id: user.id });
-      if (error) throw error;
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['problems'] }),
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, data }) => {
-      const { error } = await supabase.from('problems').update(data).eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['problems'] }),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id) => {
-      const { error } = await supabase.from('problems').delete().eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['problems'] }),
-  });
 
   // All companies from imported problems
   const allCompanies = useMemo(() => {
@@ -239,8 +222,10 @@ export default function Problems() {
   }, [problems, currentSheet, search, filterDifficulty, filterStatus, filterPlatform, filterSheet, filterPatterns, filterTopics]);
 
   const handleSubmit = (data) => {
-    if (editingProblem) {
-      updateMutation.mutate({ id: editingProblem.id, data });
+    if (formMode === 'tracking' && editingProblem) {
+      updateTrackingMutation.mutate({ id: editingProblem.id, data });
+    } else if (formMode === 'create' && editingProblem) {
+      updateMetaMutation.mutate({ id: editingProblem.id, data });
     } else {
       createMutation.mutate(data);
     }
@@ -249,15 +234,23 @@ export default function Problems() {
 
   const handleEdit = (problem) => {
     setEditingProblem(problem);
+    setFormMode('create');   // edit metadata
+    setShowForm(true);
+  };
+
+  const handleUpdateTracking = (problem) => {
+    setEditingProblem(problem);
+    setFormMode('tracking'); // edit user progress
     setShowForm(true);
   };
 
   const handleStatusChange = (problemId, newStatus) => {
-    return updateMutation.mutateAsync({
+    return updateTrackingMutation.mutateAsync({
       id: problemId,
       data: {
+        ...(problems.find(p => p.id === problemId) || {}),
         status: newStatus,
-        solved_date: newStatus === 'solved' ? new Date().toISOString() : null,
+        solvedDate: newStatus === 'solved' ? new Date().toISOString().split('T')[0] : null,
       },
     });
   };
@@ -302,7 +295,7 @@ export default function Problems() {
             )}
           </p>
         </div>
-        <Button onClick={() => { setEditingProblem(null); setShowForm(true); }}>
+        <Button onClick={() => { setEditingProblem(null); setFormMode('create'); setShowForm(true); }}>
           <Plus className="w-4 h-4 mr-2" /> Add Problem
         </Button>
       </div>
@@ -472,6 +465,7 @@ export default function Problems() {
         <ProblemTable
           problems={filteredProblems}
           onEdit={handleEdit}
+          onUpdateTracking={handleUpdateTracking}
           onDelete={(id) => deleteMutation.mutate(id)}
           onStatusChange={handleStatusChange}
         />
@@ -482,6 +476,7 @@ export default function Problems() {
         onOpenChange={setShowForm}
         onSubmit={handleSubmit}
         initialData={editingProblem}
+        mode={formMode}
       />
     </div>
   );

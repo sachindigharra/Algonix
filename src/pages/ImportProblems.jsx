@@ -1,15 +1,13 @@
 // @ts-nocheck
 import React, { useState, useCallback } from 'react';
 import * as XLSX from 'xlsx';
-import { supabase } from '@/lib/supabase';
 import { bulkImportProblems } from '@/api/problemApi';
-import { USE_SPRING } from '@/api/api';
+import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import {getUser} from '/src/api/authApi'
 
 const DIFFICULTY_MAP = {
   'easy': 'easy', 'medium': 'medium', 'hard': 'hard',
@@ -68,6 +66,8 @@ export default function ImportProblems() {
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null);
   const [selectedSheets, setSelectedSheets] = useState([]);
+  const { user } = useAuth();
+  const userId = user?.userId;
 
   const processFile = (file) => {
     const reader = new FileReader();

@@ -1,0 +1,110 @@
+Let me read through the relevant files to understand the current codebase before creating the checklist.
+
+Now I have a thorough picture of the codebase. Let me also quickly check the remaining pages and auth context.
+
+Now I have a complete picture. Here's a thorough migration checklist ordered by user flow:
+
+---
+
+# Spring Boot Migration — Testing & Bug Checklist
+
+## Pre-flight
+- [1] Spring Boot server is running on `http://localhost:8080`
+- [ ] `VITE_USE_SPRING_BACKEND=true` in `.env` (already set ✅)
+- [1] `VITE_SPRING_API_URL` is missing the `VITE_` prefix in `.env` — it's `SPRING_API_URL` which Vite **cannot read**. Fix: rename to `VITE_SPRING_API_URL=http://localhost:8080/api/v1`
+
+---
+
+## 1. Registration (`/signup`)
+
+- [ ] **Dead code:** `register` is imported from `authApi.js` but the call is commented out — Supabase is still being used. Swap to the `register()` call.
+- [ ] Test: submit registration form → Spring Boot creates user → returns session/token
+- [ ] Test: duplicate email → backend returns error → toast shows the message
+- [ ] Test: after successful register, `/` redirects correctly (needs auth-context to recognise Spring session, not Supabase session)
+- [ ] **Bug:** `authApi.getUser()` has a syntax error — `data: return api(...)` inside a bare block is invalid JS. Will crash if called.
+
+---
+
+## 2. Login (`/login`)
+
+- [ ] **Dead code:** `login` is imported from `authApi.js` but commented out — Supabase auth is still live. Swap to the `login()` call.
+- [ ] Test: valid credentials → Spring Boot `/auth/login` → session cookie set (backend must return `Set-Cookie` with `credentials: include`)
+- [ ] Test: wrong password → error toast fires
+- [ ] Test: after login, `AuthProvider` picks up the session — currently `auth-context.js` almost certainly calls `supabase.auth.getSession()` internally. **This needs to be updated** to call `/auth/me` instead.
+- [ ] Test: page refresh → session persists (cookie-based) or token re-read correctly
+
+---
+
+## 3. Auth Session / Protected Routes
+
+- [ ] `auth-context.js` — likely still 100% Supabase (`supabase.auth.getUser()`). Needs to be switched to call `getUser()` from `authApi.js` (after fixing the syntax error there).
+- [ ] All pages (`Problems`, `Dashboard`, `Contests`, `Dashboard`) call `supabase.auth.getUser()` directly — **these are dead code paths** once Spring auth is live. Each one needs to read user from context, not Supabase.
+- [ ] `signOut()` in `authApi.js` hits `/auth/logout` — verify the Sidebar/Settings logout button calls this instead of `supabase.auth.signOut()`.
+
+---
+
+## 4. Problems Section (`/problems`)
+
+- [ ] `Problems.jsx` queries Supabase directly (`supabase.from('problems')`) — not wired to Spring at all. Needs to use `getProblems()` / `createProblem()` / `updateProblem()` / `deleteProblem()` from `problemApi.js`.
+- [ ] Test: GET `/problems` → list loads
+- [ ] Test: POST `/problems` → Add Problem form submits → `toBackend()` converts enums correctly (lowercase → UPPERCASE)
+- [ ] Test: PUT `/problems/:id` → Edit dialog saves changes
+- [ ] Test: DELETE `/problems/:id` → row removed from table
+- [ ] **Bug in `ProblemFormDialog`:** form state uses `time_complexity` / `space_complexity` (snake_case) but the `Input` `onChange` writes to `time_complexity` while `toBackend()` reads both `time_complexity` and `timeComplexity`. Works but inconsistent — pick one.
+- [ ] Test: `solved_date` field — not in the Spring backend schema per the `toBackend()` comment ("dropped"). The form still shows it; verify backend silently ignores it or remove the field from the form.
+- [ ] Test: status quick-change in the table row (`onStatusChange`) — still calls Supabase `update`. Needs to call `updateProblem()`.
+- [ ] Test: filter persistence in `localStorage` — no backend dependency, should work as-is ✅
+
+---
+
+## 5. Import Problems (`/import`)
+
+- [ ] `USE_SPRING` from `api.js` is checked — Spring path calls `bulkImportProblems()` which hits `/problems/upsert`. Verify the Spring Boot endpoint is `/problems/upsert` (not `/problems/bulk` — note `api.js` uses `/problems/bulk` but `problemApi.js` uses `/problems/upsert`). **Endpoint mismatch — one of them is wrong.**
+- [ ] **Dead code:** `getUser` is imported from `authApi.js` at the top of `ImportProblems.jsx` but never called anywhere.
+- [ ] Test: upload an Excel file → parse → preview renders
+- [ ] Test: click Import → `bulkImportProblems()` fires → backend upserts → success count matches
+- [ ] Test: same problem in two sheets → `mergeProblems()` merges companies correctly before sending
+
+---
+
+## 6. Dashboard (`/`)
+
+- [ ] All four queries (`problems`, `contests`, `learning_logs`, `platform_profiles`) call Supabase directly — none are wired to Spring. Needs to use the `problemsApi`, `contestsApi`, `logsApi`, `profilesApi` from `api.js` (or the dedicated `problemApi.js`).
+- [ ] Test: stat cards populate after login
+- [ ] Test: revision queue (`getDueRevisions`) — purely frontend logic, no backend dependency ✅
+- [ ] Test: `markRevisitedMutation` calls Supabase — needs to call `updateProblem()` from Spring path
+
+---
+
+## 7. Contests (`/contests`)
+
+- [ ] All queries and mutations call Supabase directly — needs to use `contestsApi` from `api.js`.
+- [ ] Test: list loads, add/edit/delete work via Spring
+- [ ] Note: `contestApi.js` file is empty — either fill it or use `contestsApi` from `api.js`
+
+---
+
+## 8. Dead Code to Remove
+
+| File | Dead code |
+|---|---|
+| `authApi.js` | `getUser()` — syntax error, broken function |
+| `api.js` | Entire Supabase fallback blocks once migration is complete |
+| `Login.jsx` | Commented-out Spring login call + Supabase call |
+| `Signup.jsx` | Commented-out Spring register call + Supabase call |
+| `ImportProblems.jsx` | Unused `getUser` import |
+| `contestApi.js` | Empty file — delete or implement |
+| `userApi.js` | Empty file — delete or implement |
+| `.env` | `SPRING_API_URL` (missing `VITE_` prefix, Vite ignores it) |
+
+---
+
+## Quick Priority Order
+
+1. Fix `VITE_SPRING_API_URL` env var (everything in `api.js` reads the wrong key)
+2. Fix `getUser()` syntax error in `authApi.js`
+3. Swap `Login.jsx` and `Signup.jsx` to Spring calls + update `auth-context`
+4. Wire `Problems.jsx` mutations to `problemApi.js`
+5. Fix the `/problems/upsert` vs `/problems/bulk` endpoint mismatch
+6. Wire `Dashboard`, `Contests` to Spring APIs
+7. Remove all dead Supabase code

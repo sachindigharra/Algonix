@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { api } from '@/api/client';
 
 const AuthContext = createContext();
 
@@ -9,24 +9,43 @@ export const AuthProvider = ({ children }) => {
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setIsAuthenticated(!!session);
-      setIsLoadingAuth(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setIsAuthenticated(!!session);
-    });
-
-    return () => subscription.unsubscribe();
+    // Check session via cookie — Spring Boot reads the HttpOnly cookie automatically
+    api('/auth/me')
+      .then((response) => {
+        const userData = response?.data ?? response;
+        setUser(userData);
+        setIsAuthenticated(true);
+      })
+      .catch(() => {
+        // 401 = no valid session / cookie expired
+        setUser(null);
+        setIsAuthenticated(false);
+      })
+      .finally(() => {
+        setIsLoadingAuth(false);
+      });
   }, []);
 
-  const logout = () => supabase.auth.signOut();
+  const logout = async () => {
+    try {
+      await api('/auth/logout', { method: 'POST' });
+    } catch (e) {
+      console.error('[auth] logout failed:', e.message);
+    } finally {
+      // Clear client state regardless — if backend fails,
+      // user is at least logged out on the frontend
+      setUser(null);
+      setIsAuthenticated(false);
+    }
+  };
+
+  const setAuthUser = (userData) => {
+    setUser(userData);
+    setIsAuthenticated(true);
+  };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, isLoadingAuth, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, isLoadingAuth, logout, setAuthUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,15 +1,14 @@
 // @ts-nocheck
 import React, { useState, useCallback } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Code2, Trophy, BookOpen, User,
   BarChart3, ChevronLeft, ChevronRight, Flame, Settings,
   LogOut, Menu, X, Sun, Moon, FileSpreadsheet, Map } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/lib/Theme';
-import {signOut} from '/src/api/authApi'
+import { useAuth } from '@/lib/auth-context';
 
 const navItems = [
 { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
@@ -25,17 +24,20 @@ const navItems = [
 
 export default function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
+  const { logout } = useAuth();
 
   const handleMobileToggle = useCallback(() => setMobileOpen(prev => !prev), []);
   const handleCollapse = useCallback(() => setCollapsed(prev => !prev), []);
-  /* 
-  AlgoNix-auth
-  const handleLogout = useCallback(() => signOut(), []);
-   */
-  const handleLogout = useCallback(() => supabase.auth.signOut(), []);
+
+  const handleLogout = useCallback(async () => {
+    await logout();
+    navigate('/login');
+  }, [logout, navigate]);
+  
   const handleMobileClose = useCallback(() => setMobileOpen(false), []);
 
   return (
